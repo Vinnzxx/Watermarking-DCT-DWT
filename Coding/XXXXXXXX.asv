@@ -1,0 +1,161 @@
+% Step 1: Load and resize the host image to 512x512
+hostImage = imread('test1.jpeg'); % Replace with your image path
+hostImage = imresize(hostImage, [512, 512]);
+
+% Step 2: Prepare the watermark (binary image or a sequence of bits)
+% Assuming watermark is initially a color image, convert it to grayscale
+watermark = imread('wtrmrk.jpg'); % Replace with your watermark image path
+watermark = rgb2gray(watermark); % Convert color watermark to grayscale
+watermark = imbinarize(watermark, 0.5); % Binarize the grayscale watermark
+% figure, imshow(watermark)
+
+% Step 3: Divide the host image into 8x8 blocks (for DCT)
+blockSize = 8;
+[height, width] = size(hostImage);
+numBlocksH = height / blockSize;
+numBlocksW = width / blockSize;
+watermarkedImage_dct = zeros(size(hostImage));
+
+% Step 4: Apply Discrete Cosine Transform (DCT) on each block
+alpha_dct = 0.01; % Adjust this value to control the watermark strength
+
+% Resize the watermark to match the number of DCT blocks in the host image
+watermark = imresize(watermark, [numBlocksH, numBlocksW]);
+
+for i = 1:numBlocksH
+    for j = 1:numBlocksW
+        block = hostImage((i-1)*blockSize+1:i*blockSize, (j-1)*blockSize+1:j*blockSize);
+        dctBlock = dct2(block);
+        
+        % Step 5: Embed the watermark into the DCT coefficients
+        if watermark(i, j) == 1
+            % If watermark bit is 1, add watermark to DC coefficient
+            dctBlock(1, 1) = dctBlock(1, 1) + alpha_dct * dctBlock(1, 1);
+        else
+            % If watermark bit is 0, subtract watermark from DC coefficient
+            dctBlock(1, 1) = dctBlock(1, 1) - alpha_dct * dctBlock(1, 1);
+        end
+        
+        % Step 6: Apply the inverse DCT to obtain the watermarked block
+        watermarkedBlock = idct2(dctBlock);
+        
+        watermarkedImage_dct((i-1)*blockSize+1:i*blockSize, (j-1)*blockSize+1:j*blockSize) = watermarkedBlock;
+    end
+end
+
+% Display the watermarked image after DCT
+% figure;
+% subplot(1, 2, 1);
+% imshow(hostImage);
+% title('Original Host Image');
+% 
+% subplot(1, 2, 2);
+% imshow(uint8(watermarkedImage_dct));
+% title('DCT Watermarked Image');
+
+% Convert the watermarkedImage_dct to uint8 (same data type as hostImage)
+watermarkedImage_dct = uint8(watermarkedImage_dct);
+
+% Step 7: Apply Discrete Wavelet Transform (DWT) on the watermarked image from DCT step
+alpha_dwt = 0.015; % Adjust this value to control the watermark strength
+
+[cA, cH, cV, cD] = dwt2(watermarkedImage_dct, 'haar'); % Perform DWT on the watermarked image
+
+% Step 8: Resize the watermark to match the LL subband size
+watermark_dwt = imresize(watermark, [size(cA, 1), size(cA, 2)]);
+
+% Step 9: Embed the watermark into the approximation coefficient (cA) of DWT coefficients
+watermarked_cA_dwt = cA;
+watermarked_cA_dwt(watermark_dwt == 1) = cA(watermark_dwt == 1) + alpha_dwt * cA(watermark_dwt == 1);
+watermarked_cA_dwt(watermark_dwt == 0) = cA(watermark_dwt == 0) - alpha_dwt * cA(watermark_dwt == 0);
+
+% Step 10: Apply the inverse DWT to obtain the final watermarked image
+watermarkedImage_dct_dwt = idwt2(watermarked_cA_dwt, cH, cV, cD, 'haar');
+
+% Display the watermarked images
+figure;
+subplot(1, 2, 1);
+imshow(hostImage);
+title('Original Host Image');
+
+% subplot(1, 3, 2);
+% imshow(uint8(watermarkedImage_dct));
+% title('DCT Watermarked Image');
+
+subplot(1, 2, 2);
+imshow(uint8(watermarkedImage_dct_dwt));
+title('DCT+DWT Watermarked Image');
+
+% Convert the watermarkedImage_dct_dwt to uint8 (same data type as hostImage)
+watermarkedImage_dct_dwt = uint8(watermarkedImage_dct_dwt);
+
+% Calculate MSE (Mean Squared Error) for both watermarked images
+mse_dct = sum(sum((double(hostImage) - double(watermarkedImage_dct)).^2)) / (512*512);
+mse_dct_dwt = sum(sum((double(hostImage) - double(watermarkedImage_dct_dwt)).^2)) / (512*512);
+
+% Calculate PSNR (Peak Signal-to-Noise Ratio) in dB for both watermarked images
+psnr_dct = 10 * log10(255^2 / mse_dct);
+psnr_dct_dwt = 10 * log10(255^2 / mse_dct_dwt);
+
+% Calculate SSIM (Structural Similarity Index) for both watermarked images
+ssim_val_dct = ssim(hostImage, watermarkedImage_dct);
+ssim_val_dct_dwt = ssim(hostImage, watermarkedImage_dct_dwt);
+
+% Calculate UACI (Underwater Image Quality Measure) for both watermarked images
+uaci_dct = sum(sum(abs(double(hostImage) - double(watermarkedImage_dct)))) / (512*512*255);
+uaci_dct_dwt = sum(sum(abs(double(hostImage) - double(watermarkedImage_dct_dwt)))) / (512*512*255);
+
+% Calculate NPCR (Number of Pixel Change Rate) and CC (Correlation Coefficient) for both watermarked images
+[rows, cols] = size(hostImage);
+npcr_dct = sum(sum(hostImage ~= watermarkedImage_dct)) / (rows * cols) * 100;
+cc = corrcoef(double(hostImage(:)), double(watermarkedImage_dct(:)));
+cc_dct = cc(1, 2); % Extract the correlation coefficient value from the matrix
+npcr_dct_dwt = sum(sum(hostImage ~= watermarkedImage_dct_dwt)) / (rows * cols) * 100;
+cc1 = corrcoef(double(hostImage(:)), double(watermarkedImage_dct_dwt(:)));
+cc_dct_dwt = cc1(1, 2); % Extract the correlation coefficient value from the matrix
+
+% Calculate NCC (Normalized Cross-Correlation) for both watermarked images
+ncc_dct = sum(sum(hostImage .* watermarkedImage_dct)) / sqrt(sum(sum(hostImage .^ 2)) * sum(sum(watermarkedImage_dct .^ 2)));
+ncc_dct_dwt = sum(sum(hostImage .* watermarkedImage_dct_dwt)) / sqrt(sum(sum(hostImage .^ 2)) * sum(sum(watermarkedImage_dct_dwt .^ 2)));
+
+% Calculate entropy of the watermarked images
+entropy_val_dct = entropy(watermarkedImage_dct);
+entropy_val_dct_dwt = entropy(watermarkedImage_dct_dwt);
+
+% Display metrics for both watermarked images
+disp('Metrics for DCT Watermarked Image:');
+disp(['MSE: ', num2str(mse_dct)]);
+disp(['PSNR: ', num2str(psnr_dct), ' dB']);
+disp(['SSIM: ', num2str(ssim_val_dct)]);
+disp(['UACI: ', num2str(uaci_dct)]);
+disp(['NPCR: ', num2str(npcr_dct), '%']);
+disp(['CC: ', num2str(cc_dct)]);
+disp(['NCC: ', num2str(ncc_dct)]);
+disp(['Entropy: ', num2str(entropy_val_dct)]);
+
+disp('Metrics for DCT+DWT Watermarked Image:');
+disp(['MSE: ', num2str(mse_dct_dwt)]);
+disp(['PSNR: ', num2str(psnr_dct_dwt), ' dB']);
+disp(['SSIM: ', num2str(ssim_val_dct_dwt)]);
+disp(['UACI: ', num2str(uaci_dct_dwt)]);
+disp(['NPCR: ', num2str(npcr_dct_dwt), '%']);
+disp(['CC: ', num2str(cc_dct_dwt)]);
+disp(['NCC: ', num2str(ncc_dct_dwt)]);
+disp(['Entropy: ', num2str(entropy_val_dct_dwt)]);
+
+% Display histograms for both watermarked images
+figure;
+subplot(1, 2, 1);
+imhist(hostImage);
+title('Original Host Image Histogram');
+
+% subplot(1, 3, 2);
+% imhist(watermarkedImage_dct);
+% title('DCT Watermarked Image Histogram');
+
+subplot(1, 2, 2);
+imhist(watermarkedImage_dct_dwt);
+title('DCT+DWT Watermarked Image Histogram');
+
+% Save the histograms
+saveas(gcf, 'path_to_save_histograms_dct_dwt.jpg');
